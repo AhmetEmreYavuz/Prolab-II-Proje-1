@@ -1,8 +1,13 @@
+import org.openstreetmap.gui.jmapviewer.Coordinate;
+
+import java.util.List;
+
 public class Route {
     private String description;
     private double totalDistance; // km
     private int totalTime;        // dakika
     private double totalCost;     // TL
+    private List<Coordinate> coordinates;
 
     public Route(String description, double totalDistance, int totalTime, double totalCost) {
         this.description = description;
@@ -21,4 +26,9 @@ public class Route {
         return description + "\nMesafe: " + String.format("%.2f", totalDistance) + " km, Süre: " + totalTime +
                 " dakika, Ücret: " + String.format("%.2f", totalCost) + " TL";
     }
+
+    public List<Coordinate> getCoordinates() {
+        return this.coordinates;
+    }
+
 }

@@ -1,4 +1,3 @@
-// StudentPassenger.java
 public class StudentPassenger extends Passenger {
     private double discountRate; // Örneğin %50 indirim için 0.5
 
@@ -9,5 +8,16 @@ public class StudentPassenger extends Passenger {
 
     public double getDiscountRate() {
         return discountRate;
+    }
+
+    /**
+     * Öğrenci yolcu için; eğer segment taxi değilse, toplu taşıma maliyetlerinden %50 indirim uygulanır.
+     */
+    @Override
+    public double adjustCost(double cost, boolean isTaxi) {
+        if (!isTaxi) {
+            return cost * (1 - discountRate);
+        }
+        return cost;
     }
 }

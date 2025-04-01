@@ -3,79 +3,93 @@ import java.util.*;
 public class TravelPlanner {
 
     /**
-     * Tüm alternatif ulaşım rotalarını hesaplar ve özel formatta çıktı döndürür.
+     * planRoutes metodu, tüm rota alternatiflerini hesaplar ve
+     * Route nesnelerinden oluşan bir liste olarak geri döndürür.
      */
-    public static List<String> planRoutes(Passenger passenger, TransitData transitData) {
-        List<String> outputList = new ArrayList<>();
+    public static List<Route> planRoutes(Passenger passenger, TransitData transitData) {
+        List<Route> routes = new ArrayList<>();
 
-        // 1. Direkt Taksi Rotası
-        String taxiOutput = formatTaxiRoute(passenger, transitData);
-        if (taxiOutput != null) {
-            outputList.add(taxiOutput);
+        Route taxiRoute = formatTaxiRoute(passenger, transitData);
+        if (taxiRoute != null) {
+            routes.add(taxiRoute);
         }
 
-        // 2. Sadece Otobüs Rotası (yürüyüş mesafesi dahil)
-        String busOutput = formatBusRoute(passenger, transitData);
-        if (busOutput != null) {
-            outputList.add(busOutput);
+        Route busRoute = formatBusRoute(passenger, transitData);
+        if (busRoute != null) {
+            routes.add(busRoute);
         }
 
-        // 3. Sadece Tramvay Rotası
-        String tramOutput = formatTramRoute(passenger, transitData);
-        if (tramOutput != null) {
-            outputList.add(tramOutput);
+        Route tramRoute = formatTramRoute(passenger, transitData);
+        if (tramRoute != null) {
+            routes.add(tramRoute);
         }
 
-        // 4. Otobüs + Tramvay Aktarması
-        String busTramOutput = formatBusTramTransferRoute(passenger, transitData);
-        if (busTramOutput != null) {
-            outputList.add(busTramOutput);
+        Route busTramRoute = formatBusTramTransferRoute(passenger, transitData);
+        if (busTramRoute != null) {
+            routes.add(busTramRoute);
         }
 
-        // 5. Taksi + Toplu Taşıma Kombinasyonu
-        String taxiComboOutput = formatTaxiComboRoute(passenger, transitData);
-        if (taxiComboOutput != null) {
-            outputList.add(taxiComboOutput);
+        Route tramBusRoute = formatTramBusTransferRoute(passenger, transitData);
+        if (tramBusRoute != null) {
+            routes.add(tramBusRoute);
         }
 
-        return outputList;
+        return routes;
     }
 
-    // 1) Direkt Taksi Rotası
-    private static String formatTaxiRoute(Passenger passenger, TransitData transitData) {
+    // ------------------ 1) Direkt Taksi Rotası ------------------
+    static Route formatTaxiRoute(Passenger passenger, TransitData transitData) {
         Location current = passenger.getCurrentLocation();
         Location destination = passenger.getDestination();
         double distance = current.distanceTo(destination); // km cinsinden
         double cost = transitData.getTaxi().getOpeningFee() + distance * transitData.getTaxi().getCostPerKm();
         int time = (int) Math.ceil((distance / 40.0) * 60); // 40 km/s varsayım
 
-        return String.format(
-                "Taxi Rotası\n" +
-                        "mesafe: %.2f km, Süre: %d dakika, Ücret: %.2f TL\n" +
-                        "-------------------------",
-                distance, time, cost
-        );
+        String desc = String.format(
+                "Taxi Rotası\nMesafe: %.2f km, Süre: %d dk, Ücret: %.2f TL\n-------------------------",
+                distance, time, cost);
+        return new Route(desc, distance, time, cost);
     }
 
-    // 2) Sadece Otobüs Rotası (yürüyüş bilgisi dahil)
-    private static String formatBusRoute(Passenger passenger, TransitData transitData) {
+    // ------------------ 2) Sadece Otobüs Rotası ------------------
+    static Route formatBusRoute(Passenger passenger, TransitData transitData) {
         BusStopGraph busGraph = new BusStopGraph(transitData);
         Stop startBusStop = findNearestStop(passenger.getCurrentLocation(), busGraph.getBusStops().values());
         Stop endBusStop = findNearestStop(passenger.getDestination(), busGraph.getBusStops().values());
         if (startBusStop == null || endBusStop == null) return null;
 
+        double walkingSpeed = 5.0; // km/s
+        double taxiSpeed = 40.0;   // km/s
+
+        // Başlangıç segmenti: Kullanıcının konumundan en yakın otobüs durağına olan mesafe
+        double segDistance = passenger.getCurrentLocation().distanceTo(
+                new Location(startBusStop.getLat(), startBusStop.getLon()));
+        String segDesc;
+        int segTime = 0;
+        double segCost = 0.0;
+        if (segDistance < 3.0) {
+            segTime = (int) Math.ceil((segDistance / walkingSpeed) * 60);
+            // Yürüme segmentinde ücret toplu taşıma olduğundan adjustCost uygulanır (Student/Elder indirim/ücretsiz)
+            segCost = passenger.adjustCost(0.0, false);
+            segDesc = String.format("Yürüme -> %s (bus)", startBusStop.getName());
+        } else {
+            segTime = (int) Math.ceil((segDistance / taxiSpeed) * 60);
+            segCost = transitData.getTaxi().getOpeningFee() + segDistance * transitData.getTaxi().getCostPerKm();
+            segDesc = String.format("Taksi -> %s (bus)", startBusStop.getName());
+        }
+
         List<String> path = bfsBusPath(busGraph.getAdjacencyList(), startBusStop.getId(), endBusStop.getId());
         if (path == null) return null;
 
-        double walkDist = passenger.getCurrentLocation().distanceTo(
-                new Location(startBusStop.getLat(), startBusStop.getLon()));
-        int walkTime = (int) Math.ceil((walkDist / 5.0) * 60);
-
         StringBuilder sb = new StringBuilder();
         sb.append("Sadece Otobüs Rotası:\n");
-        sb.append(String.format("Yürüme-> %s (bus) -- Mesafe: %.2f km (%d dk)\n",
-                startBusStop.getName(), walkDist, walkTime));
+        sb.append(String.format("%s -- Mesafe: %.2f km, Süre: %d dk\n", segDesc, segDistance, segTime));
 
+        double totalDistance = segDistance;
+        int totalTime = segTime;
+        double totalCost = segCost;
+
+        // Otobüs segmentleri (BFS yolu üzerinden)
         for (int i = 0; i < path.size() - 1; i++) {
             String fromId = path.get(i);
             String toId = path.get(i + 1);
@@ -85,37 +99,79 @@ public class TravelPlanner {
             if (edges == null) continue;
             for (BusStopGraph.GraphEdge edge : edges) {
                 if (edge.getTo().equals(toId)) {
+                    totalDistance += edge.getDistance();
+                    totalTime += edge.getTime();
+                    // Otobüs segmenti, toplu taşıma olduğundan adjustCost uygulanır (öğrenci/yaşlı için indirim/ücretsiz)
+                    double adjustedCost = passenger.adjustCost(edge.getCost(), false);
+                    totalCost += adjustedCost;
                     sb.append(String.format(
-                            "%s (bus) -> %s (bus) -- Mesafe: %.2f km, Süre: %d dakika, Ücret: %.2f TL\n",
+                            "%s (bus) -> %s (bus) -- Mesafe: %.2f km, Süre: %d dk, Ücret: %.2f TL\n",
                             fromStop.getName(), toStop.getName(),
-                            edge.getDistance(), edge.getTime(), edge.getCost()
-                    ));
+                            edge.getDistance(), edge.getTime(), adjustedCost));
                     break;
                 }
             }
         }
+
+        // Son segment: Otobüs durağından kullanıcının varış noktasına olan mesafe
+        double finalSegmentDist = passenger.getDestination().distanceTo(
+                new Location(endBusStop.getLat(), endBusStop.getLon()));
+        int finalSegmentTime = 0;
+        double finalSegmentCost = 0.0;
+        String finalSegDesc;
+        if (finalSegmentDist < 3.0) {
+            finalSegmentTime = (int) Math.ceil((finalSegmentDist / walkingSpeed) * 60);
+            finalSegmentCost = passenger.adjustCost(0.0, false);
+            finalSegDesc = "Yürüme";
+        } else {
+            finalSegmentTime = (int) Math.ceil((finalSegmentDist / taxiSpeed) * 60);
+            finalSegmentCost = transitData.getTaxi().getOpeningFee() + finalSegmentDist * transitData.getTaxi().getCostPerKm();
+            finalSegDesc = "Taksi";
+        }
+        sb.append(String.format("%s -> Varış (otobüs durağı: %s) -- Mesafe: %.2f km, Süre: %d dk, Ücret: %.2f TL\n",
+                finalSegDesc, endBusStop.getName(), finalSegmentDist, finalSegmentTime, finalSegmentCost));
+
+        totalDistance += finalSegmentDist;
+        totalTime += finalSegmentTime;
+        totalCost += finalSegmentCost;
+
         sb.append("-------------------------");
-        return sb.toString();
+        return new Route(sb.toString(), totalDistance, totalTime, totalCost);
     }
 
-    // 3) Sadece Tramvay Rotası
-    private static String formatTramRoute(Passenger passenger, TransitData transitData) {
+    // ------------------ 3) Sadece Tramvay Rotası ------------------
+    static Route formatTramRoute(Passenger passenger, TransitData transitData) {
         TramStopGraph tramGraph = new TramStopGraph(transitData);
         Stop startTramStop = findNearestStop(passenger.getCurrentLocation(), tramGraph.getTramStops().values());
         Stop endTramStop = findNearestStop(passenger.getDestination(), tramGraph.getTramStops().values());
         if (startTramStop == null || endTramStop == null) return null;
 
+        double walkingSpeed = 5.0;
+        double taxiSpeed = 40.0;
+        double segDistance = passenger.getCurrentLocation().distanceTo(
+                new Location(startTramStop.getLat(), startTramStop.getLon()));
+        String segDesc;
+        int segTime = 0;
+        double segCost = 0.0;
+        if (segDistance < 3.0) {
+            segTime = (int) Math.ceil((segDistance / walkingSpeed) * 60);
+            segCost = passenger.adjustCost(0.0, false);
+            segDesc = String.format("Yürüme -> %s (tram)", startTramStop.getName());
+        } else {
+            segTime = (int) Math.ceil((segDistance / taxiSpeed) * 60);
+            segCost = transitData.getTaxi().getOpeningFee() + segDistance * transitData.getTaxi().getCostPerKm();
+            segDesc = String.format("Taksi -> %s (tram)", startTramStop.getName());
+        }
         List<String> path = bfsTramPath(tramGraph.getAdjacencyList(), startTramStop.getId(), endTramStop.getId());
         if (path == null) return null;
 
-        double walkDist = passenger.getCurrentLocation().distanceTo(
-                new Location(startTramStop.getLat(), startTramStop.getLon()));
-        int walkTime = (int) Math.ceil((walkDist / 5.0) * 60);
-
         StringBuilder sb = new StringBuilder();
         sb.append("Sadece Tramvay Rotası:\n");
-        sb.append(String.format("Yürüme-> %s (tram) -- Mesafe: %.2f km (%d dk)\n",
-                startTramStop.getName(), walkDist, walkTime));
+        sb.append(String.format("%s -- Mesafe: %.2f km, Süre: %d dk\n", segDesc, segDistance, segTime));
+
+        double totalDistance = segDistance;
+        int totalTime = segTime;
+        double totalCost = segCost;
 
         for (int i = 0; i < path.size() - 1; i++) {
             String fromId = path.get(i);
@@ -126,67 +182,102 @@ public class TravelPlanner {
             if (edges == null) continue;
             for (TramStopGraph.GraphEdge edge : edges) {
                 if (edge.getTo().equals(toId)) {
+                    totalDistance += edge.getDistance();
+                    totalTime += edge.getTime();
+                    double adjustedCost = passenger.adjustCost(edge.getCost(), false);
+                    totalCost += adjustedCost;
                     sb.append(String.format(
-                            "%s (tram) -> %s (tram) -- Mesafe: %.2f km, Süre: %d dakika, Ücret: %.2f TL\n",
+                            "%s (tram) -> %s (tram) -- Mesafe: %.2f km, Süre: %d dk, Ücret: %.2f TL\n",
                             fromStop.getName(), toStop.getName(),
-                            edge.getDistance(), edge.getTime(), edge.getCost()
-                    ));
+                            edge.getDistance(), edge.getTime(), adjustedCost));
                     break;
                 }
             }
         }
+
+        double finalSegmentDist = passenger.getDestination().distanceTo(
+                new Location(endTramStop.getLat(), endTramStop.getLon()));
+        int finalSegmentTime = 0;
+        double finalSegmentCost = 0.0;
+        String finalSegDesc;
+        if (finalSegmentDist < 3.0) {
+            finalSegmentTime = (int) Math.ceil((finalSegmentDist / walkingSpeed) * 60);
+            finalSegmentCost = passenger.adjustCost(0.0, false);
+            finalSegDesc = "Yürüme";
+        } else {
+            finalSegmentTime = (int) Math.ceil((finalSegmentDist / taxiSpeed) * 60);
+            finalSegmentCost = transitData.getTaxi().getOpeningFee() + finalSegmentDist * transitData.getTaxi().getCostPerKm();
+            finalSegDesc = "Taksi";
+        }
+        sb.append(String.format("%s -> Varış (tram durağı: %s) -- Mesafe: %.2f km, Süre: %d dk, Ücret: %.2f TL\n",
+                finalSegDesc, endTramStop.getName(), finalSegmentDist, finalSegmentTime, finalSegmentCost));
+
+        totalDistance += finalSegmentDist;
+        totalTime += finalSegmentTime;
+        totalCost += finalSegmentCost;
+
         sb.append("-------------------------");
-        return sb.toString();
+        return new Route(sb.toString(), totalDistance, totalTime, totalCost);
     }
 
-    // 4) Otobüs + Tramvay Aktarması
-    private static String formatBusTramTransferRoute(Passenger passenger, TransitData transitData) {
+    // ------------------ 4) Otobüs + Tramvay Aktarması ------------------
+    static Route formatBusTramTransferRoute(Passenger passenger, TransitData transitData) {
         BusStopGraph busGraph = new BusStopGraph(transitData);
         TramStopGraph tramGraph = new TramStopGraph(transitData);
-        Stop startBusStop = findNearestStop(passenger.getCurrentLocation(), busGraph.getBusStops().values());
-        Stop endTramStop = findNearestStop(passenger.getDestination(), tramGraph.getTramStops().values());
-        if (startBusStop == null || endTramStop == null) return null;
 
-        // Transfer için: startBusStop üzerinde transfer bilgisi varsa
-        if (startBusStop.getTransfer() == null || startBusStop.getTransfer().getTransferStopId() == null) {
-            return null;
+        Stop startBusStop = null;
+        double minDist = Double.MAX_VALUE;
+        for (Stop s : busGraph.getBusStops().values()) {
+            if (s.getTransfer() != null && s.getTransfer().getTransferStopId() != null) {
+                double d = passenger.getCurrentLocation().distanceTo(new Location(s.getLat(), s.getLon()));
+                if (d < minDist) {
+                    minDist = d;
+                    startBusStop = s;
+                }
+            }
         }
+        if (startBusStop == null) return null;
+
+        Stop endTramStop = findNearestStop(passenger.getDestination(), tramGraph.getTramStops().values());
+        if (endTramStop == null) return null;
+
         String transferTramStopId = startBusStop.getTransfer().getTransferStopId();
+        int transferTime = startBusStop.getTransfer().getTransferSure();
+        double transferCost = startBusStop.getTransfer().getTransferUcret();
 
-        List<String> busPath = bfsBusPath(busGraph.getAdjacencyList(), startBusStop.getId(), transferTramStopId);
-        List<String> tramPath = bfsTramPath(tramGraph.getAdjacencyList(), transferTramStopId, endTramStop.getId());
-        if (busPath == null || tramPath == null) return null;
-
-        double walkDist = passenger.getCurrentLocation().distanceTo(
-                new Location(startBusStop.getLat(), startBusStop.getLon()));
-        int walkTime = (int) Math.ceil((walkDist / 5.0) * 60);
+        double walkingSpeed = 5.0;
+        double taxiSpeed = 40.0;
 
         StringBuilder sb = new StringBuilder();
         sb.append("Otobüs + Tramvay Aktarması:\n");
-        sb.append(String.format("Yürüme-> %s (bus) -- Mesafe: %.2f km (%d dk)\n",
-                startBusStop.getName(), walkDist, walkTime));
 
-        // Otobüs segmentleri
-        for (int i = 0; i < busPath.size() - 1; i++) {
-            String fromId = busPath.get(i);
-            String toId = busPath.get(i + 1);
-            Stop fromStop = busGraph.getBusStops().get(fromId);
-            Stop toStop = busGraph.getBusStops().get(toId);
-            List<BusStopGraph.GraphEdge> edges = busGraph.getAdjacencyList().get(fromId);
-            if (edges == null) continue;
-            for (BusStopGraph.GraphEdge edge : edges) {
-                if (edge.getTo().equals(toId)) {
-                    sb.append(String.format(
-                            "%s (bus) -> %s (bus) -- Mesafe: %.2f km, Süre: %d dakika, Ücret: %.2f TL\n",
-                            fromStop.getName(), toStop.getName(),
-                            edge.getDistance(), edge.getTime(), edge.getCost()
-                    ));
-                    break;
-                }
-            }
+        double startSegDist = passenger.getCurrentLocation().distanceTo(
+                new Location(startBusStop.getLat(), startBusStop.getLon()));
+        String startSegDesc;
+        int startSegTime = 0;
+        double startSegCost = 0.0;
+        if (startSegDist < 3.0) {
+            startSegTime = (int) Math.ceil((startSegDist / walkingSpeed) * 60);
+            startSegCost = passenger.adjustCost(0.0, false);
+            startSegDesc = String.format("Yürüme -> %s (bus)", startBusStop.getName());
+        } else {
+            startSegTime = (int) Math.ceil((startSegDist / taxiSpeed) * 60);
+            startSegCost = transitData.getTaxi().getOpeningFee() + startSegDist * transitData.getTaxi().getCostPerKm();
+            startSegDesc = String.format("Taksi -> %s (bus)", startBusStop.getName());
         }
-        sb.append("Aktarma -> ").append(transferTramStopId).append(" (tram)\n");
-        // Tram segmentleri
+        sb.append(String.format("%s -- Mesafe: %.2f km, Süre: %d dk\n",
+                startSegDesc, startSegDist, startSegTime));
+        double totalDistance = startSegDist;
+        int totalTime = startSegTime;
+        double totalCost = startSegCost;
+
+        sb.append(String.format("Transfer: %s (bus) -> %s (tram) -- Süre: %d dk, Ücret: %.2f TL\n",
+                startBusStop.getName(), transferTramStopId, transferTime, transferCost));
+        totalTime += transferTime;
+        totalCost += transferCost;
+
+        List<String> tramPath = bfsTramPath(tramGraph.getAdjacencyList(), transferTramStopId, endTramStop.getId());
+        if (tramPath == null) return null;
         for (int i = 0; i < tramPath.size() - 1; i++) {
             String fromId = tramPath.get(i);
             String toId = tramPath.get(i + 1);
@@ -196,47 +287,125 @@ public class TravelPlanner {
             if (edges == null) continue;
             for (TramStopGraph.GraphEdge edge : edges) {
                 if (edge.getTo().equals(toId)) {
+                    totalDistance += edge.getDistance();
+                    totalTime += edge.getTime();
+                    double adjustedCost = passenger.adjustCost(edge.getCost(), false);
+                    totalCost += adjustedCost;
                     sb.append(String.format(
-                            "%s (tram) -> %s (tram) -- Mesafe: %.2f km, Süre: %d dakika, Ücret: %.2f TL\n",
+                            "%s (tram) -> %s (tram) -- Mesafe: %.2f km, Süre: %d dk, Ücret: %.2f TL\n",
                             fromStop.getName(), toStop.getName(),
-                            edge.getDistance(), edge.getTime(), edge.getCost()
-                    ));
+                            edge.getDistance(), edge.getTime(), adjustedCost));
                     break;
                 }
             }
         }
         sb.append("-------------------------");
-        return sb.toString();
+        return new Route(sb.toString(), totalDistance, totalTime, totalCost);
     }
 
-    // 5) Taksi + Toplu Taşıma Kombinasyonu (3 km kuralı)
-    private static String formatTaxiComboRoute(Passenger passenger, TransitData transitData) {
-        double distanceToBus = 99999;
+    // ------------------ 5) Yeni Versiyon: Tramvay + Bus Aktarması ------------------
+    static Route formatTramBusTransferRoute(Passenger passenger, TransitData transitData) {
+        TramStopGraph tramGraph = new TramStopGraph(transitData);
         BusStopGraph busGraph = new BusStopGraph(transitData);
-        Stop nearestBus = findNearestStop(passenger.getCurrentLocation(), busGraph.getBusStops().values());
-        if (nearestBus != null) {
-            distanceToBus = passenger.getCurrentLocation().distanceTo(
-                    new Location(nearestBus.getLat(), nearestBus.getLon()));
-        }
-        if (distanceToBus < 3.0) {
-            return "Taksi+Toplu Taşıma Kombinasyonu:\n" +
-                    "Yolcu durağa 3 km'den az yakın olduğu için taksi kullanılmayacaktır.\n" +
-                    "-------------------------";
-        }
-        double distance = distanceToBus;
-        int time = (int) Math.ceil((distance / 40.0) * 60);
-        double cost = transitData.getTaxi().getOpeningFee() + distance * transitData.getTaxi().getCostPerKm();
 
-        return String.format(
-                "Taksi+Toplu Taşıma Kombinasyonu:\n" +
-                        "Durağa olan mesafe: %.2f km, Süre: %d dk, Ücret: %.2f TL\n" +
-                        "-------------------------",
-                distance, time, cost
-        );
+        Stop startTramStop = null;
+        double minDist = Double.MAX_VALUE;
+        for (Stop s : tramGraph.getTramStops().values()) {
+            if (s.getTransfer() != null && s.getTransfer().getTransferStopId() != null) {
+                double d = passenger.getCurrentLocation().distanceTo(new Location(s.getLat(), s.getLon()));
+                if (d < minDist) {
+                    minDist = d;
+                    startTramStop = s;
+                }
+            }
+        }
+        if (startTramStop == null) return null;
+
+        Stop endBusStop = findNearestStop(passenger.getDestination(), busGraph.getBusStops().values());
+        if (endBusStop == null) return null;
+
+        String transferBusStopId = startTramStop.getTransfer().getTransferStopId();
+        int transferTime = startTramStop.getTransfer().getTransferSure();
+        double transferCost = startTramStop.getTransfer().getTransferUcret();
+
+        double walkingSpeed = 5.0;
+        double taxiSpeed = 40.0;
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("Tramvay + Bus Aktarması:\n");
+
+        double startSegDist = passenger.getCurrentLocation().distanceTo(
+                new Location(startTramStop.getLat(), startTramStop.getLon()));
+        String startSegDesc;
+        int startSegTime = 0;
+        double startSegCost = 0.0;
+        if (startSegDist < 3.0) {
+            startSegTime = (int) Math.ceil((startSegDist / walkingSpeed) * 60);
+            startSegCost = passenger.adjustCost(0.0, false);
+            startSegDesc = String.format("Yürüme -> %s (tram)", startTramStop.getName());
+        } else {
+            startSegTime = (int) Math.ceil((startSegDist / taxiSpeed) * 60);
+            startSegCost = transitData.getTaxi().getOpeningFee() + startSegDist * transitData.getTaxi().getCostPerKm();
+            startSegDesc = String.format("Taksi -> %s (tram)", startTramStop.getName());
+        }
+        sb.append(String.format("%s -- Mesafe: %.2f km, Süre: %d dk\n", startSegDesc, startSegDist, startSegTime));
+        double totalDistance = startSegDist;
+        int totalTime = startSegTime;
+        double totalCost = startSegCost;
+
+        sb.append(String.format("Transfer: %s (tram) -> %s (bus) -- Süre: %d dk, Ücret: %.2f TL\n",
+                startTramStop.getName(), transferBusStopId, transferTime, transferCost));
+        totalTime += transferTime;
+        totalCost += transferCost;
+
+        List<String> busPath = bfsBusPath(busGraph.getAdjacencyList(), transferBusStopId, endBusStop.getId());
+        if (busPath == null) return null;
+        for (int i = 0; i < busPath.size() - 1; i++) {
+            String fromId = busPath.get(i);
+            String toId = busPath.get(i + 1);
+            Stop fromStop = busGraph.getBusStops().get(fromId);
+            Stop toStop = busGraph.getBusStops().get(toId);
+            List<BusStopGraph.GraphEdge> edges = busGraph.getAdjacencyList().get(fromId);
+            if (edges == null) continue;
+            for (BusStopGraph.GraphEdge edge : edges) {
+                if (edge.getTo().equals(toId)) {
+                    totalDistance += edge.getDistance();
+                    totalTime += edge.getTime();
+                    double adjustedCost = passenger.adjustCost(edge.getCost(), false);
+                    totalCost += adjustedCost;
+                    sb.append(String.format("%s (bus) -> %s (bus) -- Mesafe: %.2f km, Süre: %d dk, Ücret: %.2f TL\n",
+                            fromStop.getName(), toStop.getName(),
+                            edge.getDistance(), edge.getTime(), adjustedCost));
+                    break;
+                }
+            }
+        }
+
+        double finalSegDist = passenger.getDestination().distanceTo(
+                new Location(endBusStop.getLat(), endBusStop.getLon()));
+        String finalSegDesc;
+        int finalSegTime = 0;
+        double finalSegCost = 0.0;
+        if (finalSegDist < 3.0) {
+            finalSegTime = (int) Math.ceil((finalSegDist / walkingSpeed) * 60);
+            finalSegCost = passenger.adjustCost(0.0, false);
+            finalSegDesc = "Yürüme";
+        } else {
+            finalSegTime = (int) Math.ceil((finalSegDist / taxiSpeed) * 60);
+            finalSegCost = transitData.getTaxi().getOpeningFee() + finalSegDist * transitData.getTaxi().getCostPerKm();
+            finalSegDesc = "Taksi";
+        }
+        sb.append(String.format("%s -> Varış (bus durağı: %s) -- Mesafe: %.2f km, Süre: %d dk, Ücret: %.2f TL\n",
+                finalSegDesc, endBusStop.getName(), finalSegDist, finalSegTime, finalSegCost));
+        totalDistance += finalSegDist;
+        totalTime += finalSegTime;
+        totalCost += finalSegCost;
+
+        sb.append("-------------------------");
+        return new Route(sb.toString(), totalDistance, totalTime, totalCost);
     }
 
     // ------------------ Ortak Yardımcı Metotlar ------------------
-
     private static Stop findNearestStop(Location loc, Collection<Stop> stops) {
         Stop nearest = null;
         double minDist = Double.MAX_VALUE;
@@ -250,7 +419,6 @@ public class TravelPlanner {
         return nearest;
     }
 
-    // BFS: Otobüs durakları için
     private static List<String> bfsBusPath(Map<String, List<BusStopGraph.GraphEdge>> adjacencyList,
                                            String startId, String endId) {
         Queue<String> queue = new LinkedList<>();
@@ -281,7 +449,6 @@ public class TravelPlanner {
         return null;
     }
 
-    // BFS: Tramvay durakları için
     private static List<String> bfsTramPath(Map<String, List<TramStopGraph.GraphEdge>> adjacencyList,
                                             String startId, String endId) {
         Queue<String> queue = new LinkedList<>();

@@ -1,4 +1,3 @@
-// Passenger.java
 public class Passenger {
     private String name;
     private int age;
@@ -12,20 +11,18 @@ public class Passenger {
         this.destination = destination;
     }
 
-    public String getName() {
-        return name;
-    }
+    public String getName() { return name; }
+    public int getAge() { return age; }
+    public Location getCurrentLocation() { return currentLocation; }
+    public Location getDestination() { return destination; }
 
-    public int getAge() {
-        return age;
-    }
-
-    public Location getCurrentLocation() {
-        return currentLocation;
-    }
-
-    public Location getDestination() {
-        return destination;
+    /**
+     * Genel olarak yolcu için, herhangi bir düzenleme yapılmaz.
+     * @param cost Hesaplanan orijinal maliyet.
+     * @param isTaxi Eğer segment taxi ise true; toplu taşıma veya diğer segmentler için false.
+     * @return Düzenlenmiş maliyet.
+     */
+    public double adjustCost(double cost, boolean isTaxi) {
+        return cost;
     }
 }
-
