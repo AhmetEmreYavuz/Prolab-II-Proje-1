@@ -4,9 +4,12 @@ import java.awt.Color;
 import java.util.List;
 
 public class MyMapPolyline extends MapPolygonImpl {
+
     public MyMapPolyline(List<Coordinate> points) {
-        super(points);  // Sadece koordinat listesini gönderiyoruz.
-        // Doldurma rengini şeffaf yaparak yalnızca kenar çizgisinin görünmesini sağlıyoruz.
+        super(points);
+        // Dolgu rengini tamamen şeffaf yaparak yalnızca kenar çizgisini görünür kılıyoruz
         setBackColor(new Color(0, 0, 0, 0));
+        // İsterseniz kenar çizgisinin rengini de ayarlayabilirsiniz, örneğin:
+        // setColor(Color.RED);
     }
 }

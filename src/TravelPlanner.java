@@ -69,7 +69,6 @@ public class TravelPlanner {
         double segCost = 0.0;
         if (segDistance < 3.0) {
             segTime = (int) Math.ceil((segDistance / walkingSpeed) * 60);
-            // Yürüme segmentinde ücret toplu taşıma olduğundan adjustCost uygulanır (Student/Elder indirim/ücretsiz)
             segCost = passenger.adjustCost(0.0, false);
             segDesc = String.format("Yürüme -> %s (bus)", startBusStop.getName());
         } else {
@@ -101,7 +100,6 @@ public class TravelPlanner {
                 if (edge.getTo().equals(toId)) {
                     totalDistance += edge.getDistance();
                     totalTime += edge.getTime();
-                    // Otobüs segmenti, toplu taşıma olduğundan adjustCost uygulanır (öğrenci/yaşlı için indirim/ücretsiz)
                     double adjustedCost = passenger.adjustCost(edge.getCost(), false);
                     totalCost += adjustedCost;
                     sb.append(String.format(
@@ -299,6 +297,28 @@ public class TravelPlanner {
                 }
             }
         }
+
+        // Final segment: Tramvay durağından varış noktasına yürüme veya taksi
+        double finalSegDist = passenger.getDestination().distanceTo(
+                new Location(endTramStop.getLat(), endTramStop.getLon()));
+        int finalSegTime = 0;
+        double finalSegCost = 0.0;
+        String finalSegDesc;
+        if (finalSegDist < 3.0) {
+            finalSegTime = (int) Math.ceil((finalSegDist / walkingSpeed) * 60);
+            finalSegCost = passenger.adjustCost(0.0, false);
+            finalSegDesc = "Yürüme";
+        } else {
+            finalSegTime = (int) Math.ceil((finalSegDist / taxiSpeed) * 60);
+            finalSegCost = transitData.getTaxi().getOpeningFee() + finalSegDist * transitData.getTaxi().getCostPerKm();
+            finalSegDesc = "Taksi";
+        }
+        sb.append(String.format("%s -> Varış (tram durağı: %s) -- Mesafe: %.2f km, Süre: %d dk, Ücret: %.2f TL\n",
+                finalSegDesc, endTramStop.getName(), finalSegDist, finalSegTime, finalSegCost));
+        totalDistance += finalSegDist;
+        totalTime += finalSegTime;
+        totalCost += finalSegCost;
+
         sb.append("-------------------------");
         return new Route(sb.toString(), totalDistance, totalTime, totalCost);
     }
@@ -406,7 +426,7 @@ public class TravelPlanner {
     }
 
     // ------------------ Ortak Yardımcı Metotlar ------------------
-    private static Stop findNearestStop(Location loc, Collection<Stop> stops) {
+    public static Stop findNearestStop(Location loc, Collection<Stop> stops) {
         Stop nearest = null;
         double minDist = Double.MAX_VALUE;
         for (Stop s : stops) {
@@ -419,8 +439,8 @@ public class TravelPlanner {
         return nearest;
     }
 
-    private static List<String> bfsBusPath(Map<String, List<BusStopGraph.GraphEdge>> adjacencyList,
-                                           String startId, String endId) {
+    public static List<String> bfsBusPath(Map<String, List<BusStopGraph.GraphEdge>> adjacencyList,
+                                          String startId, String endId) {
         Queue<String> queue = new LinkedList<>();
         Map<String, String> parent = new HashMap<>();
         Set<String> visited = new HashSet<>();
@@ -449,8 +469,8 @@ public class TravelPlanner {
         return null;
     }
 
-    private static List<String> bfsTramPath(Map<String, List<TramStopGraph.GraphEdge>> adjacencyList,
-                                            String startId, String endId) {
+    public static List<String> bfsTramPath(Map<String, List<TramStopGraph.GraphEdge>> adjacencyList,
+                                           String startId, String endId) {
         Queue<String> queue = new LinkedList<>();
         Map<String, String> parent = new HashMap<>();
         Set<String> visited = new HashSet<>();
